@@ -1,0 +1,70 @@
+services:
+  # MySQL 数据库
+  xxl-job-mysql:
+    image: mysql:8.0
+    container_name: xxl-job-mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: xxl_job
+      MYSQL_USER: xxl_job
+      MYSQL_PASSWORD: xxl_job123
+    ports:
+      - "3306:3306"
+    volumes:
+      - .env/mysql:/var/lib/mysql
+      - ./sql/tables_xxl_job.sql:/docker-entrypoint-initdb.d/schema.sql.bak:ro
+      - ./sql/init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
+    networks:
+      - xxl-job-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # XXL-JOB Admin
+  xxl-job-admin:
+    image: xuxueli/xxl-job-admin:3.5.0
+    container_name: xxl-job-admin
+    environment:
+      PARAMS: >-
+        --spring.datasource.url=jdbc:mysql://xxl-job-mysql:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&autoReconnect=true&serverTimezone=Asia/Shanghai
+        --spring.datasource.username=xxl_job
+        --spring.datasource.password=xxl_job123
+        --xxl.job.accessToken=default_token
+      JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8
+    ports:
+      - "8090:8080"
+    depends_on:
+      xxl-job-mysql:
+        condition: service_healthy
+    networks:
+      - xxl-job-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # 执行器：演示应用（镜像由 CI 推送到 Docker Hub）
+  xxl-job-demo:
+    image: javawiki/xxl-job-demo:latest
+    container_name: xxl-job-demo
+    environment:
+      # Spring Boot 标准环境变量覆盖 xxl.job.admin.addresses
+      XXL_JOB_ADMIN_ADDRESSES: http://xxl-job-admin:8080
+      JAVA_OPTS: -Dfile.encoding=UTF-8
+    ports:
+      # 应用自身的 server.port=8080
+      - "8080:8080"
+    # 执行器 9999 端口只在容器网络内被 Admin 回调，无需映射到宿主机
+    depends_on:
+      xxl-job-admin:
+        condition: service_healthy
+    networks:
+      - xxl-job-network
+
+networks:
+  xxl-job-network:
+    driver: bridge
