@@ -15,7 +15,7 @@
 *.txt        text eol=lf
 
 # 容器相关：Dockerfile 与 shell 脚本必须 LF
-# sql/init.sh 会挂载进 MySQL 容器执行，CRLF 会导致 /bin/sh^M: bad interpreter
+# scripts/sql/init.sh 会挂载进 MySQL 容器执行，CRLF 会导致 /bin/sh^M: bad interpreter
 Dockerfile*  text eol=lf
 *.sh         text eol=lf
 .dockerignore text eol=lf
