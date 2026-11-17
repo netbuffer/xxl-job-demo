@@ -97,7 +97,6 @@ public class AdvancedJobSample {
                 // 5. 优雅停机与中断检测（极关键：响应控制台「终止任务」动作）
                 if (Thread.currentThread().isInterrupted()) {
                     XxlJobHelper.log("警告: 收到中断信号，任务被主动终止！已处理: {} 条，正在安全退出...", processedCount);
-                    XxlJobHelper.handleFail(String.format("任务被终止，当前分片[%d/%d]中断于批次[%d]", shardIndex, shardTotal, currentBatch));
                     return;
                 }
 
@@ -115,8 +114,13 @@ public class AdvancedJobSample {
             XxlJobHelper.log("分片进度: 批次 [{}] 处理完成 (进度: {}%), 本节点命中处理: {} 条",
                     currentBatch, String.format("%.1f", progress), successCount);
 
-            // 模拟批次间耗时
-            TimeUnit.MILLISECONDS.sleep(300);
+            // 模拟批次间耗时（捕获中断以防在休眠间隙被终止）
+            try {
+                TimeUnit.MILLISECONDS.sleep(300);
+            } catch (InterruptedException e) {
+                XxlJobHelper.log("警告: 批次间休眠时收到终止信号，已处理: {} 条，安全退出！", processedCount);
+                return;
+            }
         }
 
         long costTime = System.currentTimeMillis() - startTime;
@@ -142,30 +146,32 @@ public class AdvancedJobSample {
     @XxlJob("stepWorkflowJobHandler")
     public void stepWorkflowJobHandler() throws Exception {
         String jobParam = XxlJobHelper.getJobParam();
-        XxlJobHelper.log(">>> [步骤1/4] 参数预检与环境准备, 入参: {}", jobParam);
-        TimeUnit.SECONDS.sleep(1);
+        XxlJobHelper.log(">>> [步骤1/3] 任务启动，即将开始一个 60 秒的循环任务（请在控制台点击「终止任务」进行测试）...");
 
-        // 模拟步骤 2: 数据拉取
-        XxlJobHelper.log(">>> [步骤2/4] 从上游服务拉取最新待处理业务记录,预计耗时1分钟...");
-        int recordCount = 100;
-        TimeUnit.MINUTES.sleep(1);
+        // 模拟长耗时批处理循环（总计 60 秒）
+        for (int i = 1; i <= 60; i++) {
+            // 1. 显式检测中断标志位（应对纯 CPU/数据库计算间隙）
+            if (Thread.currentThread().isInterrupted()) {
+                XxlJobHelper.log(">>> [中断感知] 检测到终止信号（isInterrupted=true），已运行 {} 秒，安全退出！", i);
+                return;
+            }
 
-        // 模拟中断响应检测
-        if (Thread.currentThread().isInterrupted()) {
-            XxlJobHelper.log("任务在步骤2被管理员终止！");
-            XxlJobHelper.handleFail("步骤2被手动终止");
-            return;
+            try {
+                // 模拟每秒处理一批数据
+                TimeUnit.SECONDS.sleep(1);
+            } catch (InterruptedException e) {
+                // 2. 休眠中被终止：打印业务日志后直接 return 退出，无需恢复中断位，也无需 handleFail（框架会自动标记为终止失败）
+                XxlJobHelper.log(">>> [中断感知] 休眠中被管理员叫停（已运行 {} 秒），安全退出！", i);
+                return;
+            }
+
+            if (i % 5 == 0) {
+                XxlJobHelper.log(">>> 任务进行中... 已平稳运行 {}/60 秒", i);
+            }
         }
 
-        // 模拟步骤 3: 核心业务规则计算与持久化
-        XxlJobHelper.log(">>> [步骤3/4] 核心业务计算与入库处理中 (记录数: {})...", recordCount);
-        TimeUnit.SECONDS.sleep(2);
-
-        // 模拟步骤 4: 汇总通知与收尾
-        XxlJobHelper.log(">>> [步骤4/4] 生成执行汇总审计，分发后续通知...");
-        TimeUnit.SECONDS.sleep(1);
-
-        XxlJobHelper.handleSuccess("4个步骤全流程顺利执行完毕，累计处理记录: " + recordCount);
+        XxlJobHelper.log(">>> [步骤3/3] 任务全流程自然执行完毕（未被提前终止）。");
+        XxlJobHelper.handleSuccess("任务自然执行完成（60秒已满）");
     }
 
     private void processSingleItem(MockItem item) {
